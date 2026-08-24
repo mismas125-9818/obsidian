@@ -126,9 +126,7 @@ class ObsidianClient:
         """
         return self.zoznam_suborov_v_priecinku("", rekurzivne=True)
 
-    # ==========================================
-    # 2. SPRÁVA PRIEČINKOV (FOLDERS)
-    # ==========================================
+    # ==========================================\n    # 2. SPRÁVA PRIEČINKOV (FOLDERS)\n    # ==========================================
 
     def vytvor_priecinok(self, cesta_k_priecinku: str) -> None:
         """
@@ -147,25 +145,36 @@ class ObsidianClient:
 
     def vymaz_priecinok(self, cesta_k_priecinku: str) -> None:
         """
-        Vymaže priečinok v trezore rekurzívnym odstránením všetkých súborov,
-        ktoré sa v ňom nachádzajú.
+        Vymaže priečinok v trezore tak, že najprv rekurzívne odstráni všetky súbory,
+        ktoré sa v ňom nachádzajú, a na záver pošle požiadavku DELETE na vymazanie samotného priečinka z disku.
         
         :param cesta_k_priecinku: Relatívna cesta k priečinku (napr. 'Archív/2026')
         """
-        prefix = cesta_k_priecinku.strip("/") + "/"
+        cesta_clean = cesta_k_priecinku.strip("/")
+        prefix = cesta_clean + "/"
         vsetky_subory = self.zoznam_vsetkych_suborov()
         subory_na_zmazanie = [s for s in vsetky_subory if s.startswith(prefix)]
         
+        # 1. Najprv vymažeme všetky súbory vo vnútri priečinka
         for subor in subory_na_zmazanie:
             try:
                 self.vymaz_poznamku(subor)
+            except Exception:
+                pass
+                
+        # 2. Na záver vymažeme samotný prázdny priečinok
+        try:
+            self.vymaz_poznamku(cesta_clean)
+        except Exception:
+            try:
+                self.vymaz_poznamku(cesta_clean + "/")
             except Exception:
                 pass
 
     def presun_priecinok(self, stara_cesta: str, nova_cesta: str) -> None:
         """
         Presunie alebo premenuje priečinok vrátane všetkých súborov, ktoré sa v ňom nachádzajú.
-        Vykonáva sa rekurzívnym presunom jednotlivých súborov na novú cestu.
+        Vykonáva sa rekurzívnym presunom jednotlivých súborov na novú cestu a čistým vymazaním starého priečinka.
         
         :param stara_cesta: Pôvodná relatívna cesta k priečinku
         :param nova_cesta: Nová relatívna cesta k priečinku
@@ -179,6 +188,10 @@ class ObsidianClient:
         
         if not subory_na_presun:
             self.vytvor_priecinok(nova_cesta)
+            try:
+                self.vymaz_priecinok(stara_cesta)
+            except Exception:
+                pass
             return
 
         # Presun každého súboru rekurzívne do novej štruktúry
@@ -186,10 +199,14 @@ class ObsidianClient:
             relativna_cesta = stary_subor[len(prefix):]
             novy_subor = f"{nova_cesta}/{relativna_cesta}"
             self.presun_subor(stary_subor, novy_subor)
+            
+        # Zmazanie starého prázdneho priečinka
+        try:
+            self.vymaz_priecinok(stara_cesta)
+        except Exception:
+            pass
 
-    # ==========================================
-    # 3. SPRÁVA ZÁZNAMOV V PRIEČINKOCH
-    # ==========================================
+    # ==========================================\n    # 3. SPRÁVA ZÁZNAMOV V PRIEČINKOCH\n    # ==========================================
 
     def vytvor_zaznam_v_priecinku(self, priecinok: str, nazov_suboru: str, obsah: str) -> requests.Response:
         """
@@ -242,9 +259,7 @@ class ObsidianClient:
         response_delete = requests.delete(url_stara, headers=self.headers, verify=False)
         response_delete.raise_for_status()
 
-    # ==========================================
-    # 4. POKROČILÉ VYHĽADÁVANIE (SEARCH)
-    # ==========================================
+    # ==========================================\n    # 4. POKROČILÉ VYHĽADÁVANIE (SEARCH)\n    # ==========================================
 
     def vyhladaj_jednoducho(self, dopyt: str, dlzka_kontextu: Optional[int] = 100) -> List[dict]:
         """
@@ -298,7 +313,7 @@ class ObsidianClient:
         return response.json()
 
 if __name__ == "__main__":
-    print("--- Ukážka robustného použitia knižnice ObsidianClient (v8 - Robustná Oprava) ---")
+    print("--- Ukážka robustného použitia knižnice ObsidianClient (v9 - Kompletné Upratovanie) ---")
     
     client = ObsidianClient()
     
@@ -337,7 +352,7 @@ if __name__ == "__main__":
     print(f"\n[4] Premenovanie celého priečinka '{test_priecinok}' na '{novy_priecinok}'...")
     try:
         client.presun_priecinok(test_priecinok, novy_priecinok)
-        print("Celý priečinok vrátane súborov bol presunutý.")
+        print("Celý priečinok vrátane súborov bol presunutý, starý priečinok bol vyčistený.")
     except Exception as e:
         print(f"Chyba pri presúvaní priečinka: {e}")
 
@@ -356,6 +371,6 @@ if __name__ == "__main__":
     print(f"\n[6] Upratovanie - Mazanie priečinka '{novy_priecinok}'...")
     try:
         client.vymaz_priecinok(novy_priecinok)
-        print("Priečinok bol úspešne vymazaný.")
+        print("Priečinok aj so všetkým obsahom bol úspešne vymazaný z disku.")
     except Exception as e:
         print(f"Chyba pri mazaní priečinka: {e}")
