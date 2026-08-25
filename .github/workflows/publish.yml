@@ -1,0 +1,24 @@
+name: Publish to PyPI
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  pypi-publish:
+    name: Upload release to PyPI
+    runs-on: ubuntu-latest
+    permissions:
+      # TOTO JE KĽÚČOVÉ pre OpenID Connect (OIDC) bez hesla/tokenu:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Build and Publish
+        run: |
+          uv build
+          uv publish
