@@ -1,6 +1,7 @@
 import requests
 import urllib3
 from typing import List, Optional, Union
+import re
 
 # Potlačenie varovaní pre lokálny SSL certifikát Obsidianu
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -312,6 +313,196 @@ class ObsidianClient:
         response.raise_for_status()
         return response.json()
 
+        # ==========================================
+    # 5. PRÁCA S TAGMI A ODKAZMI (LINKS & TAGS)
+    # ==========================================
+    
+    def ziskaj_tagy_z_poznamky(self, cesta_k_suboru: str) -> List[str]:
+        """Extrahuje všetky tagy (inline aj z YAML front matter) z poznámky."""
+        obsah = self.citaj_poznamku(cesta_k_suboru)
+        tagy = set()
+        
+        # 1. Extrahovať tagy z YAML front matter
+        yaml_match = re.search(r'^---\s*\n(.*?)\n---', obsah, re.DOTALL | re.MULTILINE)
+        if yaml_match:
+            yaml_block = yaml_match.group(1)
+            tags_line_match = re.search(r'^tags:\s*\[?(.*?)\]?$', yaml_block, re.MULTILINE)
+            if tags_line_match:
+                raw_tags = tags_line_match.group(1)
+                for t in re.split(r'[,\s]+', raw_tags):
+                    if t.strip():
+                        tagy.add(t.strip().strip('#'))
+            for match in re.finditer(r'^\s*-\s*#?([a-zA-Z0-9_\-/]+)', yaml_block, re.MULTILINE):
+                tagy.add(match.group(1))
+
+        # 2. Extrahovať inline tagy z tela poznámky
+        inline_tagy = re.findall(r'(?:^|\s)(#[a-zA-Z0-9_\-/]+)(?=\s|$)', obsah, re.MULTILINE)
+        for t in inline_tagy:
+            tagy.add(t.lstrip('#'))
+            
+        return sorted(list(tagy))
+
+    def ziskaj_odkazy_z_poznamky(self, cesta_k_suboru: str) -> List[dict]:
+        """Extrahuje všetky odkazy (Wikilinky aj Markdown linky) z poznámky."""
+        obsah = self.citaj_poznamku(cesta_k_suboru)
+        odkazy = []
+        
+        for match in re.finditer(r'\[\[(.*?)\]\]', obsah):
+            target = match.group(1).split('|')[0].strip()
+            odkazy.append({'type': 'wikilink', 'target': target})
+            
+        for match in re.finditer(r'\[.*?\]\((.*?)\)', obsah):
+            target = match.group(1).strip()
+            if not target.startswith('http'):
+                target = target.replace('.md', '')
+                odkazy.append({'type': 'markdown', 'target': target})
+                
+        return odkazy
+
+    def najdi_spatne_odkazy(self, cielova_poznamka: str) -> List[str]:
+        """Nájde všetky poznámky, ktoré obsahujú odkaz na zadanú poznámku."""
+        dopyt = f"[[{cielova_poznamka}]]"
+        vysledky = self.vyhladaj_jednoducho(dopyt)
+        
+        backlinky = []
+        pattern = re.compile(r'\[\[' + re.escape(cielova_poznamka) + r'(?:\|.*?)?\]\]')
+        
+        for v in vysledky:
+            try:
+                obsah = self.citaj_poznamku(v['filename'])
+                if pattern.search(obsah):
+                    backlinky.append(v['filename'])
+            except Exception:
+                pass
+        return backlinky
+
+    def pridaj_tag_do_poznamky(self, cesta_k_suboru: str, tag: str) -> requests.Response:
+        """Pridá tag do poznámky. Ak existuje YAML 'tags:', pridá ho tam, inak ako inline."""
+        tag = tag.strip().lstrip('#')
+        obsah = self.citaj_poznamku(cesta_k_suboru)
+        
+        # Robustná kontrola, či tag už existuje ako samostatné slovo
+        if re.search(r'(?:^|\s)#' + re.escape(tag) + r'(?=\s|$)', obsah, re.MULTILINE):
+            return None # Tag už existuje
+            
+        yaml_match = re.search(r'^(---\s*\n.*?tags:\s*\[?)(.*?)(\]?.*?\n---)', obsah, re.DOTALL | re.MULTILINE)
+        if yaml_match:
+            pred = yaml_match.group(1)
+            stare_tagy = yaml_match.group(2).strip()
+            kon = yaml_match.group(3)
+            
+            if not stare_tagy:
+                novy_zoznam = tag
+            elif stare_tagy.endswith(']'):
+                novy_zoznam = f"{stare_tagy[:-1]}, {tag}]"
+            else:
+                novy_zoznam = f"{stare_tagy}, {tag}"
+                
+            novy_obsah = obsah[:yaml_match.start()] + pred + novy_zoznam + kon + obsah[yaml_match.end():]
+        else:
+            novy_obsah = obsah.rstrip() + f"\n\n#{tag}\n"
+            
+        return self.vytvor_alebo_uprav_poznamku(cesta_k_suboru, novy_obsah)
+
+    def odstran_tag_z_poznamky(self, cesta_k_suboru: str, tag: str) -> requests.Response:
+        """Odstráni konkrétny tag z poznámky (z YAML aj z inline textu)."""
+        tag = tag.strip().lstrip('#')
+        obsah = self.citaj_poznamku(cesta_k_suboru)
+        
+        # 1. Odstránenie inline tagu (OPRAVA: Použitie skupiny \1 namiesto lookbehindu)
+        # Zachováva medzeru alebo začiatok riadku, aby sa nezlepili slová
+        novy_obsah = re.sub(r'(^|\s)#' + re.escape(tag) + r'(?=\s|$)', r'\1', obsah, flags=re.MULTILINE)
+        
+        # 2. Upratanie YAML (odstránenie tagu z riadku tags:)
+        def remove_from_yaml(match):
+            line = match.group(0)
+            line = re.sub(r'[,\s]*' + re.escape(tag) + r'[,\s]*', ' ', line)
+            line = re.sub(r',\s*,', ',', line)
+            line = re.sub(r'\[\s*,', '[', line)
+            line = re.sub(r',\s*\]', ']', line)
+            line = re.sub(r'\[\s*\]', '', line) # Ak nezostal žiadny tag, vymažeme prázdne zátvorky
+            return line.strip()
+
+        novy_obsah = re.sub(r'^tags:.*$', remove_from_yaml, novy_obsah, flags=re.MULTILINE)
+        
+        return self.vytvor_alebo_uprav_poznamku(cesta_k_suboru, novy_obsah.strip() + "\n")
+
+    def zoznam_vsetkych_tagov_v_trezore(self) -> List[str]:
+        """Prejde všetky súbory a vráti unikátny zoznam všetkých tagov."""
+        vsetky_tagy = set()
+        for subor in self.zoznam_vsetkych_suborov():
+            if subor.endswith('.md'):
+                try:
+                    tagy = self.ziskaj_tagy_z_poznamky(subor)
+                    vsetky_tagy.update(tagy)
+                except Exception:
+                    pass
+        return sorted(list(vsetky_tagy))
+
+# ==========================================
+# HLAVNÝ BLOK (Mimo triedy!)
+# ==========================================
+if __name__ == "__main__":
+    print("--- Ukážka robustného použitia knižnice ObsidianClient ---")
+    
+    client = ObsidianClient()
+    test_priecinok = "Projekty/TestPriečinok"
+    test_subor = "TestPoznamka.md"
+    novy_obsah = "# Testovací súbor v priečinku\nTento súbor bude automaticky presunutý."
+    
+    # 1. Tvorenie priečinka
+    print("\n[1] Vytváranie prázdneho priečinka...")
+    try:
+        client.vytvor_priecinok(test_priecinok)
+        print(f"Priečinok '{test_priecinok}' bol pripravený.")
+    except Exception as e:
+        print(f"Nepodarilo sa vytvoriť priečinok: {e}")
+        
+    # 2. Vytvorenie súboru v priečinku
+    print("\n[2] Vytváranie súboru v priečinku...")
+    try:
+        client.vytvor_zaznam_v_priecinku(test_priecinok, test_subor, novy_obsah)
+        print(f"Súbor '{test_subor}' bol vytvorený v '{test_priecinok}'.")
+    except Exception as e:
+        print(f"Nepodarilo sa vytvoriť súbor v priečinku: {e}")
+        
+    # 3. Presunutie súboru
+    stary_subor_cesta = f"{test_priecinok}/{test_subor}"
+    novy_subor_cesta = f"{test_priecinok}/Presunuty_{test_subor}"
+    print(f"\n[3] Presúvanie súboru z '{stary_subor_cesta}' do '{novy_subor_cesta}'...")
+    try:
+        client.presun_subor(stary_subor_cesta, novy_subor_cesta)
+        print("Súbor úspešne presunutý.")
+    except Exception as e:
+        print(f"Chyba pri presúvaní súboru: {e}")
+
+    # 4. Modifikácia / premenovanie celého priečinka
+    novy_priecinok = "Projekty/PresunutyPriečinok"
+    print(f"\n[4] Premenovanie celého priečinka '{test_priecinok}' na '{novy_priecinok}'...")
+    try:
+        client.presun_priecinok(test_priecinok, novy_priecinok)
+        print("Celý priečinok vrátane súborov bol presunutý, starý priečinok bol vyčistený.")
+    except Exception as e:
+        print(f"Chyba pri presúvaní priečinka: {e}")
+
+    # 5. Výpis všetkých súborov v novom priečinku
+    print("\n[5] Kontrola existujúcich súborov v trezore:")
+    try:
+        vsetky_subory = client.zoznam_vsetkych_suborov()
+        print(f"Celkový rekurzívny počet súborov: {len(vsetky_subory)}")
+        for s in vsetky_subory:
+            if novy_priecinok in s:
+                print(f"  - {s}")
+    except Exception as e:
+        print(f"Chyba pri načítaní zoznamu: {e}")
+
+    # 6. Upratanie - Vymazanie priečinka a všetkých súborov v ňom
+    print(f"\n[6] Upratovanie - Mazanie priečinka '{novy_priecinok}'...")
+    try:
+        client.vymaz_priecinok(novy_priecinok)
+        print("Priečinok aj so všetkým obsahom bol úspešne vymazaný z disku.")
+    except Exception as e:
+        print(f"Chyba pri mazaní priečinka: {e}")
 if __name__ == "__main__":
     print("--- Ukážka robustného použitia knižnice ObsidianClient (v9 - Kompletné Upratovanie) ---")
     

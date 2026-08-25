@@ -1,192 +1,276 @@
-# 📚 Dokumentácia: Python Knižnica pre Obsidian Local REST API (v4)
+# ObsidianClient - Dokumentácia knižnice
 
-Táto knižnica poskytuje robustné, objektovo-orientované rozhranie (wrapper) pre komunikáciu s vaším **Obsidian trezorom (vault)** pomocou komunitného pluginu **Local REST API**. Umožňuje plnú automatizáciu a správu vašich poznámok, priečinkov a vyhľadávania priamo z Python skriptov.
-
-Verzia **v4** dokumentácie reflektuje najnovšiu stabilnú verziu knižnice (`obsidian_client-v9.py`), ktorá úspešne rieši zložité chovania aplikácie Obsidian, akými sú blokovanie skrytých systémových súborov (chyba 500 pri `.keep`) a potreba fyzického odmazávania prázdnych adresárov z disku pomocou API.
+`ObsidianClient` je robustná Python knižnica určená na prácu s **Obsidian Local REST API**. Umožňuje kompletnú správu poznámok, priečinkov, vyhľadávanie pomocou Dataview a JsonLogic, ako aj automatizovanú prácu s tagmi a odkazmi (backlinkami).
 
 ---
 
-## ⚙️ Požiadavky a Inštalácia
+## Obsah
+1. [Inštalácia a požiadavky](#1-inštalácia-a-požiadavky)
+2. [Inicializácia klienta](#2-inicializácia-klienta)
+3. [Základná práca s poznámkami (CRUD)](#3-základná-práca-s-poznámkami-crud)
+4. [Správa priečinkov (Folders)](#4-správa-priečinkov-folders)
+5. [Správa záznamov v priečinkoch](#5-správa-záznamov-v-priečinkoch)
+6. [Pokročilé vyhľadávanie (Search)](#6-pokročilé-vyhľadávanie-search)
+7. [Práca s tagmi a odkazmi](#7-práca-s-tagmi-a-odkazmi)
+8. [Kompletný príklad použitia](#8-kompletný-príklad-použitia)
+9. [Riešenie známych špecifík API](#9-riešenie-známych-špecifík-api)
 
-### 1. Systémové závislosti
-Pre beh knižnice potrebujete mať nainštalovaný:
-* **Python 3.7+**
-* Knižnicu **`requests`** pre sieťovú komunikáciu.
-* Knižnicu **`urllib3`** (štandardne dodávanú s requests) pre správu SSL certifikátov.
+---
 
-Inštalácia balíkov cez terminál:
+## 1. Inštalácia a požiadavky
+
+Knižnica vyžaduje Python 3.7+ a nasledujúce závislosti:
+
 ```bash
-pip install requests
+pip install requests urllib3
 ```
 
-### 2. Príprava na strane Obsidianu
-1. V aplikácii Obsidian otvorte **Settings** (Nastavenia) -> **Community Plugins** (Komunitné pluginy).
-2. Kliknite na **Browse** (Prehliadať), vyhľadajte plugin **Local REST API** (od autora *coddingtonbear*) a nainštalujte ho.
-3. Po inštalácii plugin **povoľte**.
-4. Otvorte nastavenia pluginu Local REST API:
-   * Vygenerujte a skopírujte si **API Key** (API kľúč).
-   * Overte port pre pripojenie (štandardne **`27124`** pre bezpečné HTTPS, alebo **`27123`** pre nešifrované HTTP).
+V aplikácii Obsidian je potrebné mať nainštalovaný a aktivovaný komunizný plugin **Local REST API**. V nastaveniach pluginu získate váš API token.
 
 ---
 
-## 🚀 Inicializácia a Pripojenie
+## 2. Inicializácia klienta
 
-Knižnicu importujete do svojho projektu a inicializujete vytvorením inštancie triedy `ObsidianClient`. Knižnica automaticky potláča varovania o neoverených SSL certifikátoch (keďže Obsidian generuje lokálny self-signed certifikát).
+Trida `ObsidianClient` prijíma API kľúč a URL adresu lokálneho servera Obsidianu.
 
 ```python
 from obsidian_client import ObsidianClient
 
-# Inicializácia s vaším vopred nakonfigurovaným API kľúčom a adresou
-client = ObsidianClient()
-
-# Inicializácia s vlastnými parametrami (napr. pre iný port alebo stroj)
-client_vlastny = ObsidianClient(
-    api_key="VAS_API_KLUC_Z_NASTAVENI",
-    base_url="https://127.0.0.1:27124"
+# Inicializácia s vlastným API kľúčom
+client = ObsidianClient(
+    api_key="VÁS_API_TOKEN_Z_OBSIDIANU",
+    base_url="https://127.0.0.1:27124"  # Štandardný port Local REST API
 )
 ```
 
 ---
 
-## 🛠️ Kompletný Prehľad Metód (API Reference)
+## 3. Základná práca s poznámkami (CRUD)
 
-### 1. Základná práca s poznámkami (CRUD)
+### `vytvor_alebo_uprav_poznamku(cesta_k_suboru, obsah)`
+Vytvorí novú poznámku alebo prepíše existujúcu poznámku v trezore (vault). Nadradené priečinky sa vytvoria automaticky.
 
-#### `vytvor_alebo_uprav_poznamku(cesta_k_suboru: str, obsah: str) -> requests.Response`
-Vytvorí novú poznámku (`.md`) alebo kompletne prepíše obsah už existujúcej poznámky na zadanej ceste. Ak adresáre v ceste neexistujú, Obsidian ich na pozadí automaticky vytvorí.
-* **`cesta_k_suboru`**: Relatívna cesta od koreňa trezoru (napr. `"Projekty/Ciele2026.md"`).
-* **`obsah`**: Textový obsah uležený s kódovaním UTF-8.
-
-#### `pridaj_na_konec_poznamky(cesta_k_suboru: str, pridany_text: str) -> requests.Response`
-Otvorí existujúcu poznámku a bezpečne pridá nový text na jej koniec. Ak súbor neexistuje, vytvorí sa prázdny a text sa zapíše.
-* **`pridany_text`**: Text na pridanie (napr. `"\n- [ ] Nová úloha z Pythonu"`).
-
-#### `citaj_poznamku(cesta_k_suboru: str) -> str`
-Načíta kompletný obsah poznámky z trezoru.
-* **Návratová hodnota**: Textový obsah vrátane YAML front matter dekódovaný v UTF-8.
-
-#### `vymaz_poznamku(cesta_k_suboru: str) -> requests.Response`
-Natrvalo vymaže špecifikovaný súbor alebo poznámku z vášho trezoru.
-
-#### `zoznam_vsetkych_suborov() -> List[str]`
-Načíta zoznam **všetkých** súborov a priečinkov v celom trezore. Knižnica na pozadí vykonáva robustné rekurzívne prehľadávanie, keďže štandardný `/vault/` endpoint vracia len položky z koreňového adresára.
-
----
-
-### 2. Správa Priečinkov (Folders)
-
-Keďže Obsidian REST API nemá priamy endpoint na čisté zakladanie prázdnych zložiek, knižnica využíva overené systémové obchádzky.
-
-#### `vytvor_priecinok(cesta_k_priecinku: str) -> None`
-Vytvorí nový priečinok na zadanej relatívnej ceste. 
-* *Technické pozadie:* Na pozadí zapíše dočasný súbor `keep.md`. Obsidian je tým donútený vytvoriť celú zložku na disku, na čo knižnica súbor `keep.md` ihneď odstráni. Priečinok v Obsidiane zostane pripravený a čistý.
-
-#### `vymaz_priecinok(cesta_k_priecinku: str) -> None`
-Vymaže priečinok vrátane všetkých súborov a podadresárov v ňom.
-* *Technické pozadie:* Metóda najprv rekurzívne vyhľadá a vymaže všetky vnútorné súbory, aby nezostali visieť na disku. Následne odošle požiadavku `DELETE` priamo na cestu prázdneho priečinka, čím ho **fyzicky odstráni z disku** a zmizne aj z bočného panela Obsidianu.
-
-#### `presun_priecinok(stara_cesta: str, nova_cesta: str) -> None`
-Kompletne presunie alebo premenuje priečinok vrátane rekurzívneho presunu všetkých vnútorných súborov na novú cestu. Po úspešnom presune súborov starý prázdny priečinok automaticky a čisto vymaže.
-
----
-
-### 3. Práca so súbormi vo vnútri priečinkov
-
-#### `vytvor_zaznam_v_priecinku(priecinok: str, nazov_suboru: str, obsah: str) -> requests.Response`
-Pohodlná skratka na uloženie nového súboru (poznámky) priamo do určeného priečinka.
-* **`priecinok`**: Názov alebo cesta priečinka (napr. `"Práca/Projekty"`).
-* **`nazov_suboru`**: Názov súboru s príponou (napr. `"report.md"`).
-
-#### `vymaz_zaznam_v_priecinku(priecinok: str, nazov_suboru: str) -> requests.Response`
-Vymaže konkrétny súbor v zadanom priečinku.
-
-#### `presun_subor(stara_cesta: str, nova_cesta: str) -> None`
-Presunie alebo premenuje súbor v rámci trezoru. Táto metóda pracuje na úrovni raw bajtov, čo znamená, že **bezpečne prenáša nielen poznámky, ale aj binárne prílohy (obrázky, PDF)** a plne zachováva ich pôvodný `Content-Type`.
-
----
-
-### 4. Vyhľadávanie v Trezore (Search)
-
-Knižnica plne integruje tri pokročilé formáty vyhľadávania podporované Local REST API:
-
-#### `vyhladaj_jednoducho(dopyt: str, dlzka_kontextu: Optional[int] = 100) -> List[dict]`
-Fuzzy fulltextové vyhľadávanie v celom trezore. Vracia zoznam zodpovedajúcich súborov, ich skóre relevantnosti a textové úryvky (kontext) okolo nájdenej zhody.
-
-#### `vyhladaj_dataview(dql_dopyt: str) -> List[dict]`
-Spustí dopyt v jazyku **Dataview Query Language (DQL)**. Vyžaduje, aby ste mali v Obsidiane nainštalovaný a aktívny plugin *Dataview*.
-* **Príklad dopytu**: `"TABLE file.folder, tags FROM #projekty"`
-
-#### `vyhladaj_jsonlogic(json_logic_dopyt: Union[dict, str]) -> List[dict]`
-Vyhľadávanie v metadátach a vlastnostiach poznámok pomocou štruktúrovanej logiky [JsonLogic](https://jsonlogic.com/). Vhodné pre filtrovanie podľa tagov, front matter premenných, veľkosti či dátumov.
-
----
-
-## 💡 Kompletný Ukážkový Scenár (Quickstart)
-
-Tento príklad predvádza kompletný životný cyklus: vytvorenie priečinka, zápis poznámky, jej modifikáciu, presun, fulltextové vyhľadávanie a na záver kompletné čisté vymazanie testovacieho prostredia (vrátane prázdnych zložiek z disku).
+- **`cesta_k_suboru`** (*str*): Relatívna cesta k poznámke (napr. `'Projekty/PythonTest.md'`).
+- **`obsah`** (*str*): Textový alebo Markdown obsah.
+- **Návratová hodnota**: `requests.Response`
 
 ```python
-import time
-from obsidian_client import ObsidianClient
+client.vytvor_alebo_uprav_poznamku("Poznamky/Napad.md", "# Nový nápad\nTento text bol vytvorený cez API.")
+```
 
-# 1. Inicializácia
-client = ObsidianClient()
+### `citaj_poznamku(cesta_k_suboru)`
+Prečíta a vráti obsah existujúcej poznámky v trezore ako UTF-8 reťazec.
 
-test_priecinok = "Projekty/PythonTestPriecinok"
-test_subor = "Uloha.md"
+- **`cesta_k_suboru`** (*str*): Cesta k súboru.
+- **Návratová hodnota**: `str`
 
-# 2. Vytvorenie priečinka (čistá keep.md obchádzka)
-print("Vytváram prázdny priečinok...")
-client.vytvor_priecinok(test_priecinok)
+```python
+text = client.citaj_poznamku("Poznamky/Napad.md")
+print(text)
+```
 
-# 3. Zápis súboru do priečinka
-print("Zapisujem testovaciu poznámku...")
-obsah_poznamky = """---
-tags: [it/automatizacia, test/python]
-priorita: vysoka
----
-# Automatizačný test
-Heslo dňa pre overenie vyhľadávania je: **Kryptonit2026**.
-"""
-client.vytvor_zaznam_v_priecinku(test_priecinok, test_subor, obsah_poznamky)
+### `pridaj_na_konec_poznamky(cesta_k_suboru, pridany_text)`
+Pridá text na koniec existujúcej poznámky (append).
 
-# 4. Pridanie riadku na koniec
-print("Dopĺňam poznámku...")
-client.pridaj_na_konec_poznamky(f"{test_priecinok}/{test_subor}", "\n- [ ] Pridané neskôr z Pythonu.")
+- **`cesta_k_suboru`** (*str*): Cesta k súboru.
+- **`pridany_text`** (*str*): Text na pridanie.
+- **Návratová hodnota**: `requests.Response`
 
-# 5. Vyhľadávanie v trezore
-print("\nTestujem fulltextové vyhľadávanie...")
-time.sleep(1)  # Malá pauza na indexáciu Obsidianom
-vysledky = client.vyhladaj_jednoducho("Kryptonit2026")
-for v in vysledky:
-    print(f" -> Nájdená zhoda v súbore: {v['filename']} (Skóre: {v['score']})")
+```python
+client.pridaj_na_konec_poznamky("Poznamky/Napad.md", "\n\n- [ ] Pridať ďalší krok")
+```
 
-# 6. Premenovanie priečinka (presunie aj všetky súbory v ňom a starý zmaže)
-novy_priecinok = "Projekty/PythonArchiv"
-print(f"\nPresúvam celý priečinok do '{novy_priecinok}'...")
-client.presun_priecinok(test_priecinok, novy_priecinok)
+### `vymaz_poznamku(cesta_k_suboru)`
+Vymaže konkrétnu poznámku alebo súbor z trezoru.
 
-# 7. Čistenie (Upratanie) - Vymaže nový priečinok so všetkými súbormi a zmaže ho z disku
-print("Čistím testovacie prostredie (vymazávam priečinok z disku)...")
-client.vymaz_priecinok(novy_priecinok)
-print("Hotovo! Priečinok bol úspešne vymazaný z vášho trezoru.")
+```python
+client.vymaz_poznamku("Poznamky/Napad.md")
+```
+
+### `zoznam_suborov_v_priecinku(priecinok="", rekurzivne=True)`
+Vráti zoznam relatívnych ciest k súborom v zadanom priečinku.
+
+```python
+subory = client.zoznam_suborov_v_priecinku("Projekty", rekurzivne=True)
+print(subory)
+```
+
+### `zoznam_vsetkych_suborov()`
+Rekurzívne prejde celý trezor a vráti zoznam všetkých súborov.
+
+```python
+vsetky = client.zoznam_vsetkych_suborov()
 ```
 
 ---
 
-## ⚠️ Riešenie problémov (Troubleshooting)
+## 4. Správa priečinkov (Folders)
 
-### 1. Prečo metóda `vytvor_priecinok` predtým zlyhávala s chybou `500 Internal Server Error`?
-* **Dôvod:** Obsidian nepovoľuje cez API vytvárať skryté súbory alebo súbory, ktoré začínajú bodkou (ako `.keep`). Ak sa o to pokúsite, interný engine Obsidianu vyhodí chybu.
-* **Riešenie:** Knižnica bola upravená tak, aby namiesto `.keep` zapisovala štandardný Markdown súbor `keep.md`, ktorý Obsidian bez problémov povolí vytvoriť aj vymazať.
+Local REST API nemá priamy koncový bod na vytváranie priečinkov. Knižnica toto správanie elegantne obchádza.
 
-### 2. Prečo sa priečinky v Obsidiane predtým nemazali a zostávali prázdne v bočnom paneli?
-* **Dôvod:** Pôvodné verzie sa spoliehali na to, že po zmazaní súborov priečinok zmizne sám, alebo sa pokúšali mazať priečinok rekurzívne bez dôkladného zoznamu. Štandardné API pre zoznam súborov navyše neprehľadáva podadresáre rekurzívne.
-* **Riešenie:** V najnovšej verzii knižnica najprv prejde kompletný zoznam súborov rekurzívnou metódou `zoznam_suborov_v_priecinku`, vymaže všetky vnútorné položky, a na záver odošle požiadavku `DELETE` priamo na cestu samotného prázdneho priečinka. Tým ho Obsidian fyzicky odstráni z disku počítača.
+### `vytvor_priecinok(cesta_k_priecinku)`
+Vytvorí nový priečinok v trezore pomocou dočasného súboru `keep.md`, ktorý po vytvorení adresára automaticky vymaže.
 
-### 3. Chyba `ConnectionRefusedError` alebo `MaxRetryError`
-* Uistite sa, že aplikácia Obsidian je v pozadí **spustená** (REST API beží lokálne priamo v procese aplikácie).
-* Skontrolujte, či port v inicializácii klienta (`27124`) zodpovedá portu zobrazenému v nastaveniach pluginu Local REST API.
+```python
+client.vytvor_priecinok("Archív/2026/Projekt_A")
+```
 
-### 4. Chyba `401 Unauthorized`
-* Overte, či sa API kľúč, ktorý odovzdávate pri vytváraní inštancie `ObsidianClient()`, zhoduje s kľúčom, ktorý vidíte v nastaveniach pluginu Local REST API priamo v Obsidiane.
+### `vymaz_priecinok(cesta_k_priecinku)`
+Rekurzívne najprv odstráni všetky súbory vo vnútri priečinka a následne vymaže samotný priečinok z disku.
+
+```python
+client.vymaz_priecinok("Archív/2026/Projekt_A")
+```
+
+### `presun_priecinok(stara_cesta, nova_cesta)`
+Presunie alebo premenuje celý priečinok vrátane všetkých jeho súborov a podadresárov. Starý prázdny priečinok vyčistí.
+
+```python
+client.presun_priecinok("Projekty/StaryNazov", "Projekty/NovyNazov")
+```
+
+---
+
+## 5. Správa záznamov v priečinkoch
+
+### `vytvor_zaznam_v_priecinku(priecinok, nazov_suboru, obsah)`
+Pohodlná metóda na vytvorenie súboru vo vnútri špecifikovaného priečinka.
+
+```python
+client.vytvor_zaznam_v_priecinku("Úlohy", "Dnes.md", "# Dnešné úlohy")
+```
+
+### `vymaz_zaznam_v_priecinku(priecinok, nazov_suboru)`
+Vymaže konkrétny súbor v danom priečinku.
+
+```python
+client.vymaz_zaznam_v_priecinku("Úlohy", "Dnes.md")
+```
+
+### `presun_subor(stara_cesta, nova_cesta)`
+Presunie alebo premenuje súbor v rámci trezoru so zachovaním pôvodného typov obsahu (`Content-Type`).
+
+```python
+client.presun_subor("Denník/2026-01-01.md", "Archív/2026-01-01.md")
+```
+
+---
+
+## 6. Pokročilé vyhľadávanie (Search)
+
+### `vyhladaj_jednoducho(dopyt, dlzka_kontextu=100)`
+Vykoná fulltextové vyhľadávanie v celom trezore s nastavením dĺžky úryvku kontextu.
+
+```python
+vysledky = client.vyhladaj_jednoducho("Python", dlzka_kontextu=50)
+for res in vysledky:
+    print(res["filename"], res["matches"])
+```
+
+### `vyhladaj_dataview(dql_dopyt)`
+Vykoná vyhľadávanie pomocou Dataview Query Language (DQL). Vyžaduje nainštalovaný plugin **Dataview**.
+
+```python
+dql = "TABLE rating, status FROM #kniha SORT rating DESC"
+vysledky = client.vyhladaj_dataview(dql)
+```
+
+### `vyhladaj_jsonlogic(json_logic_dopyt)`
+Vykoná vyhľadávanie v metadátach pomocou komplexného dopytu JsonLogic (vhodné pre filtrovanie podľa YAML front matter).
+
+```python
+query = {
+    "==": [{"var": "frontmatter.status"}, "dokončené"]
+}
+vysledky = client.vyhladaj_jsonlogic(query)
+```
+
+---
+
+## 7. Práca s tagmi a odkazmi
+
+### `ziskaj_tagy_z_poznamky(cesta_k_suboru)`
+Extrahuje všetky tagy z poznámky – tak z YAML front matter, ako aj inline tagy (`#tag`).
+
+```python
+tagy = client.ziskaj_tagy_z_poznamky("Projekty/Python.md")
+# Vráti: ['python', 'dev', 'projekty']
+```
+
+### `ziskaj_odkazy_z_poznamky(cesta_k_suboru)`
+Extrahuje všetky interné odkazy (Wikilinky `[[odkaz]]` aj Markdown odkazové syntaxe).
+
+```python
+odkazy = client.ziskaj_odkazy_z_poznamky("Projekty/Python.md")
+```
+
+### `najdi_spatne_odkazy(cielova_poznamka)`
+Nájde všetky poznámky, ktoré ukazujú (odkazujú) na zadanú cielovú poznámku.
+
+```python
+backlinks = client.najdi_spatne_odkazy("Python")
+```
+
+### `pridaj_tag_do_poznamky(cesta_k_suboru, tag)`
+Pridá tag do poznámky. Ak v poznámke existuje YAML `tags:`, pridá ho tam, inak vloží inline tag na koniec súboru.
+
+```python
+client.pridaj_tag_do_poznamky("Projekty/Python.md", "dolezite")
+```
+
+### `odstran_tag_z_poznamky(cesta_k_suboru, tag)`
+Odstráni konkrétny tag z poznámky (z YAML hlavičky aj inline textu).
+
+```python
+client.odstran_tag_z_poznamky("Projekty/Python.md", "dolezite")
+```
+
+### `zoznam_vsetkych_tagov_v_trezore()`
+Prejde rekurzívne všetky `.md` súbory v trezore a vráti zjednotený unikátny zoznam všetkých tagov.
+
+```python
+vsetky_tagy = client.zoznam_vsetkych_tagov_v_trezore()
+```
+
+---
+
+## 8. Kompletný príklad použitia
+
+```python
+from obsidian_client import ObsidianClient
+
+client = ObsidianClient(api_key="tvoj_api_token")
+
+# 1. Vytvorenie priečinka a poznámky
+priecinok = "Projekty/Knižnica"
+client.vytvor_priecinok(priecinok)
+
+obsah = """---
+tags: [python, api]
+---
+# Obsidian Client Python
+Tento modul slúži na spájanie Pythonu s [[Obsidian]].
+"""
+
+client.vytvor_zaznam_v_priecinku(priecinok, "Prehlad.md", obsah)
+
+# 2. Pridanie tagu a kontrola tagov
+client.pridaj_tag_do_poznamky(f"{priecinok}/Prehlad.md", "dokumentacia")
+tagy = client.ziskaj_tagy_z_poznamky(f"{priecinok}/Prehlad.md")
+print("Tagy v poznámke:", tagy)
+
+# 3. Vyhľadávanie
+vysledky = client.vyhladaj_jednoducho("Obsidian")
+print(f"Nájdené výsledky: {len(vysledky)}")
+
+# 4. Upratanie
+client.vymaz_priecinok(priecinok)
+```
+
+---
+
+## 9. Riešenie známych špecifík API
+
+1. **Vytváranie adresárov**: Local REST API nepodporuje natívny endpoint pre vytvorenie adresára. Používa sa vytvorenie legitímneho súboru `keep.md` a jeho okamžité zmazanie. (Súbory s bodkou ako `.keep` spúšťajú na strane Obsidianu serverovú chybu HTTP 500).
+2. **Vymazávanie a presun priečinkov**: API neumaže priečinok s obsahom. Knižnica najprv rekurzívne vyčistí súbory v priečinku a až potom vymaže samotný adresár.
+3. **SSL Varovania**: Nakoľko Obsidian používa lokálny samo-podpísaný SSL certifikát, knihovňa automaticky vypína varovania `InsecureRequestWarning` pomocou `urllib3.disable_warnings()`.
