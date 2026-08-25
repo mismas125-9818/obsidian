@@ -13,7 +13,7 @@ class ObsidianClient:
     Kompatibilná so štandardnou špecifikáciou pluginu Local REST API.
     """
     
-    def __init__(self, api_key: str = "89231b04eaf3dcdce34dcdbbd077559f58165991aef62a72d68a43438d27d78c", base_url: str = "https://127.0.0.1:27124"):
+    def __init__(self, api_key: str = "key", base_url: str = "ip"):
         """
         Inicializuje klienta pre Obsidian API.
         
